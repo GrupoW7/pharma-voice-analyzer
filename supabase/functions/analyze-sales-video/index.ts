@@ -12,12 +12,80 @@ serve(async (req) => {
   }
 
   try {
-    const { salesperson, product, objective, transcript } = await req.json();
+    const { salesperson, product, objective, videoBase64, mimeType } = await req.json();
     const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
 
     if (!LOVABLE_API_KEY) {
       throw new Error('LOVABLE_API_KEY não configurada');
     }
+
+    if (!videoBase64 || !mimeType) {
+      throw new Error('Dados do vídeo não fornecidos');
+    }
+
+    console.log('Iniciando transcrição do vídeo...');
+
+    // Step 1: Transcribe the video using Gemini
+    const transcriptionPrompt = `Por favor, transcreva completamente o áudio deste vídeo de vendas. 
+    
+Inclua:
+1. Todo o diálogo falado, palavra por palavra
+2. Pausas significativas (indicar com [...])
+3. Tom emocional quando perceptível (ex: [empolgado], [confiante], [hesitante])
+4. Descrição breve de elementos visuais importantes que complementam a fala
+
+Formate a transcrição de forma clara e sequencial.`;
+
+    const transcriptionResponse = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${LOVABLE_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'google/gemini-2.5-flash',
+        messages: [
+          {
+            role: 'user',
+            content: [
+              { type: 'text', text: transcriptionPrompt },
+              {
+                type: 'image_url',
+                image_url: {
+                  url: `data:${mimeType};base64,${videoBase64}`
+                }
+              }
+            ]
+          }
+        ],
+        temperature: 0.3,
+        max_tokens: 4000,
+      }),
+    });
+
+    if (!transcriptionResponse.ok) {
+      const errorText = await transcriptionResponse.text();
+      console.error('Erro na transcrição:', transcriptionResponse.status, errorText);
+      
+      if (transcriptionResponse.status === 429) {
+        return new Response(
+          JSON.stringify({ error: 'Limite de taxa excedido. Tente novamente mais tarde.' }),
+          { status: 429, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+      if (transcriptionResponse.status === 402) {
+        return new Response(
+          JSON.stringify({ error: 'Créditos insuficientes. Adicione créditos à sua conta.' }),
+          { status: 402, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+      throw new Error('Erro ao transcrever vídeo');
+    }
+
+    const transcriptionData = await transcriptionResponse.json();
+    const transcript = transcriptionData.choices[0].message.content;
+
+    console.log('Transcrição concluída. Iniciando análise...');
 
     const systemPrompt = `Você é um "Analista de Performance de Vendas IA", um especialista sênior em coaching de vendas para a indústria farmacêutica. Sua especialidade é analisar roteiros e abordagens de comunicação em vídeo. Seu tom é profissional, analítico, objetivo e, acima de tudo, construtivo.
 
@@ -99,6 +167,7 @@ FORMATO DO RELATÓRIO:
 
 IMPORTANTE: Seja específico, baseado em evidências da transcrição, e foque em feedback acionável.`;
 
+    // Step 2: Analyze the transcript
     const userPrompt = `Por favor, analise o seguinte vídeo de vendas:
 
 Vendedor: ${salesperson}
@@ -108,7 +177,7 @@ Objetivo: ${objective}
 Transcrição:
 ${transcript}`;
 
-    const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
+    const analysisResponse = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${LOVABLE_API_KEY}`,
@@ -125,26 +194,28 @@ ${transcript}`;
       }),
     });
 
-    if (!response.ok) {
-      if (response.status === 429) {
+    if (!analysisResponse.ok) {
+      if (analysisResponse.status === 429) {
         return new Response(
           JSON.stringify({ error: 'Limite de taxa excedido. Tente novamente mais tarde.' }),
           { status: 429, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         );
       }
-      if (response.status === 402) {
+      if (analysisResponse.status === 402) {
         return new Response(
           JSON.stringify({ error: 'Créditos insuficientes. Adicione créditos à sua conta.' }),
           { status: 402, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         );
       }
-      const errorText = await response.text();
-      console.error('Erro da API AI:', response.status, errorText);
+      const errorText = await analysisResponse.text();
+      console.error('Erro da API AI na análise:', analysisResponse.status, errorText);
       throw new Error('Erro ao processar análise');
     }
 
-    const data = await response.json();
-    const analysis = data.choices[0].message.content;
+    const analysisData = await analysisResponse.json();
+    const analysis = analysisData.choices[0].message.content;
+
+    console.log('Análise concluída com sucesso.');
 
     return new Response(
       JSON.stringify({ analysis }),

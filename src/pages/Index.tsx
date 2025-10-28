@@ -19,7 +19,8 @@ const Index = () => {
           salesperson: data.salesperson,
           product: data.product,
           objective: data.objective,
-          transcript: data.transcript,
+          videoBase64: data.videoBase64,
+          mimeType: data.mimeType,
         },
       });
 
