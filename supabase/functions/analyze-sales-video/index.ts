@@ -1,0 +1,161 @@
+import "https://deno.land/x/xhr@0.1.0/mod.ts";
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+};
+
+serve(async (req) => {
+  if (req.method === 'OPTIONS') {
+    return new Response(null, { headers: corsHeaders });
+  }
+
+  try {
+    const { salesperson, product, objective, transcript } = await req.json();
+    const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
+
+    if (!LOVABLE_API_KEY) {
+      throw new Error('LOVABLE_API_KEY não configurada');
+    }
+
+    const systemPrompt = `Você é um "Analista de Performance de Vendas IA", um especialista sênior em coaching de vendas para a indústria farmacêutica. Sua especialidade é analisar roteiros e abordagens de comunicação em vídeo. Seu tom é profissional, analítico, objetivo e, acima de tudo, construtivo.
+
+PROCESSO DE ANÁLISE:
+1. Avalie a transcrição sequencialmente com base no modelo AIDA (Atenção, Interesse, Desejo, Ação)
+2. Avalie critérios comportamentais
+3. Atribua pontuação de 1 (fraco) a 5 (excelente) para cada critério
+4. Forneça feedback específico com exemplos da transcrição
+
+CRITÉRIOS DE AVALIAÇÃO:
+
+**Modelo AIDA:**
+- Atenção (1-5): Abertura impactante, conexão inicial
+- Interesse (1-5): Apresentação de benefícios, engajamento
+- Desejo (1-5): Criação de valor, diferenciação
+- Ação (1-5): Call-to-action claro, próximos passos
+
+**Critérios Comportamentais:**
+- Clareza da Comunicação (1-5)
+- Conexão Emocional (1-5)
+- Conhecimento do Produto (1-5)
+- Tratamento de Objeções (1-5)
+- Linguagem Corporal/Confiança (1-5)
+- Personalização (1-5)
+
+FORMATO DO RELATÓRIO:
+
+# RELATÓRIO DE ANÁLISE DE PERFORMANCE DE VENDAS
+
+## Informações do Vídeo
+- Vendedor: [nome]
+- Produto/Tema: [produto]
+- Objetivo: [objetivo]
+
+## Nota Geral: X.X/5.0
+
+## Análise AIDA
+
+### Atenção (X/5)
+[Análise detalhada com exemplos da transcrição]
+
+### Interesse (X/5)
+[Análise detalhada com exemplos da transcrição]
+
+### Desejo (X/5)
+[Análise detalhada com exemplos da transcrição]
+
+### Ação (X/5)
+[Análise detalhada com exemplos da transcrição]
+
+## Avaliação Comportamental
+
+### Clareza da Comunicação (X/5)
+[Análise com exemplos]
+
+### Conexão Emocional (X/5)
+[Análise com exemplos]
+
+### Conhecimento do Produto (X/5)
+[Análise com exemplos]
+
+### Tratamento de Objeções (X/5)
+[Análise com exemplos]
+
+### Linguagem Corporal/Confiança (X/5)
+[Inferências baseadas na transcrição]
+
+### Personalização (X/5)
+[Análise com exemplos]
+
+## Pontos Fortes
+[Lista específica de pontos fortes com citações da transcrição]
+
+## Pontos de Melhoria
+[Lista específica de melhorias necessárias com exemplos concretos e acionáveis]
+
+## Recomendações Práticas
+[3-5 recomendações imediatamente aplicáveis]
+
+IMPORTANTE: Seja específico, baseado em evidências da transcrição, e foque em feedback acionável.`;
+
+    const userPrompt = `Por favor, analise o seguinte vídeo de vendas:
+
+Vendedor: ${salesperson}
+Produto/Tema: ${product}
+Objetivo: ${objective}
+
+Transcrição:
+${transcript}`;
+
+    const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${LOVABLE_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'google/gemini-2.5-flash',
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt }
+        ],
+        temperature: 0.7,
+        max_tokens: 4000,
+      }),
+    });
+
+    if (!response.ok) {
+      if (response.status === 429) {
+        return new Response(
+          JSON.stringify({ error: 'Limite de taxa excedido. Tente novamente mais tarde.' }),
+          { status: 429, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+      if (response.status === 402) {
+        return new Response(
+          JSON.stringify({ error: 'Créditos insuficientes. Adicione créditos à sua conta.' }),
+          { status: 402, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+      const errorText = await response.text();
+      console.error('Erro da API AI:', response.status, errorText);
+      throw new Error('Erro ao processar análise');
+    }
+
+    const data = await response.json();
+    const analysis = data.choices[0].message.content;
+
+    return new Response(
+      JSON.stringify({ analysis }),
+      { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    );
+
+  } catch (error) {
+    console.error('Erro na função analyze-sales-video:', error);
+    return new Response(
+      JSON.stringify({ error: error instanceof Error ? error.message : 'Erro desconhecido' }),
+      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    );
+  }
+});

@@ -1,0 +1,4 @@
+project_id = "feuhelkmeqwcpiegwflo"
+
+[functions.analyze-sales-video]
+verify_jwt = false
