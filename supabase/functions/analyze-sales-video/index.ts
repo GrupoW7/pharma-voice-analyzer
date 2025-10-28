@@ -37,7 +37,6 @@ Inclua:
 Formate a transcrição de forma clara e sequencial.`;
 
     const transcriptionResponse = await fetch(
-      // *** CORREÇÃO APLICADA AQUI ***
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${GEMINI_API_KEY}`,
       {
         method: 'POST',
@@ -83,7 +82,6 @@ Formate a transcrição de forma clara e sequencial.`;
         );
       }
       if (transcriptionResponse.status === 400) {
-        // Captura o erro específico da API se disponível
         let errorDetails = 'Formato de vídeo não suportado ou vídeo muito grande.';
         try {
           const errorJson = JSON.parse(errorText);
@@ -100,23 +98,33 @@ Formate a transcrição de forma clara e sequencial.`;
     }
 
     const transcriptionData = await transcriptionResponse.json();
-    
-    // Verificação de segurança: checa se a resposta tem o formato esperado
-    if (!transcriptionData.candidates || !transcriptionData.candidates[0].content || !transcriptionData.candidates[0].content.parts[0].text) {
-      console.error('Resposta inesperada da API de transcrição:', JSON.stringify(transcriptionData, null, 2));
-      
-      // Se a resposta for um "block" por segurança, repassa o motivo
-      if (transcriptionData.candidates[0].finishReason === 'SAFETY') {
-         return new Response(
-          JSON.stringify({ error: 'O vídeo foi bloqueado por motivos de segurança.' }),
-          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        );
-      }
+    
+    // *** LÓGICA DE SEGURANÇA CORRIGIDA ***
+    if (!transcriptionData.candidates || transcriptionData.candidates.length === 0) {
+      console.error('Resposta inesperada da API (sem candidates):', JSON.stringify(transcriptionData, null, 2));
+      throw new Error('Formato de resposta inesperado da API de transcrição.');
+    }
 
-      throw new Error('Formato de resposta inesperado da API de transcrição.');
-    }
+    const transcriptionCandidate = transcriptionData.candidates[0];
 
-    const transcript = transcriptionData.candidates[0].content.parts[0].text;
+    // Checa se a transcrição foi interrompida por algum motivo (SEGURANÇA, etc)
+    if (transcriptionCandidate.finishReason && transcriptionCandidate.finishReason !== 'STOP') {
+      const reason = transcriptionCandidate.finishReason;
+      console.error(`Transcrição falhou. Motivo: ${reason}`);
+      return new Response(
+        JSON.stringify({ error: `O vídeo foi bloqueado pela API. Motivo: ${reason}` }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    // Agora sim, podemos checar o conteúdo com segurança
+    if (!transcriptionCandidate.content || !transcriptionCandidate.content.parts || !transcriptionCandidate.content.parts[0] || !transcriptionCandidate.content.parts[0].text) {
+      console.error('Resposta inesperada da API (formato de conteúdo inválido):', JSON.stringify(transcriptionData, null, 2));
+      throw new Error('Formato de resposta inesperado da API de transcrição.');
+    }
+    // *** FIM DA LÓGICA CORRIGIDA ***
+
+    const transcript = transcriptionCandidate.content.parts[0].text;
 
     console.log('Transcrição concluída. Iniciando análise...');
 
@@ -215,9 +223,8 @@ ${transcript}
 `;
 
     const analysisResponse = await fetch(
-      // *** CORREÇÃO APLICADA AQUI ***
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${GEMINI_API_KEY}`,
-    m {
+      { // <-- Erro 'm {' corrigido
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -225,19 +232,19 @@ ${transcript}
         body: JSON.stringify({
           contents: [
             {
-              role: "user", // Definindo a "persona" do system prompt
+              role: "user",
               parts: [
                 { text: systemPrompt }
               ]
             },
             {
-              role: "model", // Resposta "fake" para o modelo continuar
+              role: "model",
               parts: [
                 { text: "Entendido. Estou pronto para analisar a transcrição. Por favor, forneça os detalhes e a transcrição." }
               ]
             },
-            {
-              role: "user", // O prompt real do usuário
+            {
+              role: "user",
               parts: [
                 { text: userPrompt }
               ]
@@ -245,15 +252,18 @@ ${transcript}
           ],
           generationConfig: {
             temperature: 0.7,
-a         maxOutputTokens: 4000,
-            // Adicionado "responseMimeType" para garantir que a saída seja Markdown (texto)
-            responseMimeType: "text/plain", 
+            maxOutputTokens: 4000, // <-- Erro 'a ' corrigido
+            responseMimeType: "text/plain", 
           }
         }),
       }
     );
 
     if (!analysisResponse.ok) {
+        // Adiciona log de erro para a análise também
+      const errorText = await analysisResponse.text();
+      console.error('Erro da API Gemini na análise:', analysisResponse.status, errorText);
+
       if (analysisResponse.status === 429) {
         return new Response(
           JSON.stringify({ error: 'Limite de taxa excedido. Tente novamente mais tarde.' }),
@@ -266,34 +276,40 @@ a         maxOutputTokens: 4000,
           { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         );
       }
-      const errorText = await analysisResponse.text();
-      console.error('Erro da API Gemini na análise:', analysisResponse.status, errorText);
-      throw new Error('Erro ao processar análise');
+      throw new Error(`Erro ao processar análise: ${errorText}`);
     }
 
     const analysisData = await analysisResponse.json();
 
-    // Verificação de segurança similar à da transcrição
-    if (!analysisData.candidates || !analysisData.candidates[0].content || !analysisData.candidates[0].content.parts[0].text) {
-      console.error('Resposta inesperada da API de análise:', JSON.stringify(analysisData, null, 2));
+    // *** LÓGICA DE SEGURANÇA CORRIGIDA (para a Análise) ***
+    if (!analysisData.candidates || analysisData.candidates.length === 0) {
+      console.error('Resposta inesperada da API de análise (sem candidates):', JSON.stringify(analysisData, null, 2));
+      throw new Error('Formato de resposta inesperado da API de análise.');
+    }
+    
+    const analysisCandidate = analysisData.candidates[0];
 
-      if (analysisData.candidates[0].finishReason === 'SAFETY') {
-         return new Response(
-          JSON.stringify({ error: 'A análise foi bloqueada por motivos de segurança.' }),
-          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        );
-      }
-      
-      throw new Error('Formato de resposta inesperado da API de análise.');
-    }
+    if (analysisCandidate.finishReason && analysisCandidate.finishReason !== 'STOP') {
+      const reason = analysisCandidate.finishReason;
+      console.error(`Análise falhou. Motivo: ${reason}`);
+      return new Response(
+        JSON.stringify({ error: `A análise foi bloqueada pela API. Motivo: ${reason}` }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
 
-    const analysis = analysisData.candidates[0].content.parts[0].text;
+    if (!analysisCandidate.content || !analysisCandidate.content.parts || !analysisCandidate.content.parts[0] || !analysisCandidate.content.parts[0].text) {
+      console.error('Resposta inesperada da API de análise (formato de conteúdo inválido):', JSON.stringify(analysisData, null, 2));
+      throw new Error('Formato de resposta inesperado da API de análise.');
+    }
+    // *** FIM DA LÓGICA CORRIGIDA ***
+
+    const analysis = analysisCandidate.content.parts[0].text;
 
     console.log('Análise concluída com sucesso.');
 
-    // *** ESTA É A LINHA QUE VOCÊ PEDIU NA PRIMEIRA VEZ ***
     return new Response(
-      JSON.stringify({ analysis, transcript }), // Retorna ambos os objetos
+      JSON.stringify({ analysis, transcript }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
 
@@ -301,7 +317,7 @@ a         maxOutputTokens: 4000,
     console.error('Erro na função analyze-sales-video:', error);
     return new Response(
       JSON.stringify({ error: error instanceof Error ? error.message : 'Erro desconhecido' }),
-bu    { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } } // <-- Erro 'bu' corrigido
     );
   }
 });
