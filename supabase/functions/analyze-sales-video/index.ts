@@ -13,10 +13,10 @@ serve(async (req) => {
 
   try {
     const { salesperson, product, objective, videoBase64, mimeType } = await req.json();
-    const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
+    const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
 
-    if (!LOVABLE_API_KEY) {
-      throw new Error('LOVABLE_API_KEY não configurada');
+    if (!GEMINI_API_KEY) {
+      throw new Error('GEMINI_API_KEY não configurada');
     }
 
     if (!videoBase64 || !mimeType) {
@@ -36,32 +36,34 @@ Inclua:
 
 Formate a transcrição de forma clara e sequencial.`;
 
-    const transcriptionResponse = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${LOVABLE_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: 'google/gemini-2.5-flash',
-        messages: [
-          {
-            role: 'user',
-            content: [
-              { type: 'text', text: transcriptionPrompt },
-              {
-                type: 'image_url',
-                image_url: {
-                  url: `data:${mimeType};base64,${videoBase64}`
+    const transcriptionResponse = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${GEMINI_API_KEY}`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          contents: [
+            {
+              parts: [
+                { text: transcriptionPrompt },
+                {
+                  inline_data: {
+                    mime_type: mimeType,
+                    data: videoBase64
+                  }
                 }
-              }
-            ]
+              ]
+            }
+          ],
+          generationConfig: {
+            temperature: 0.3,
+            maxOutputTokens: 4000,
           }
-        ],
-        temperature: 0.3,
-        max_tokens: 4000,
-      }),
-    });
+        }),
+      }
+    );
 
     if (!transcriptionResponse.ok) {
       const errorText = await transcriptionResponse.text();
@@ -73,17 +75,23 @@ Formate a transcrição de forma clara e sequencial.`;
           { status: 429, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         );
       }
-      if (transcriptionResponse.status === 402) {
+      if (transcriptionResponse.status === 403) {
         return new Response(
-          JSON.stringify({ error: 'Créditos insuficientes. Adicione créditos à sua conta.' }),
-          { status: 402, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          JSON.stringify({ error: 'Chave da API inválida.' }),
+          { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+      if (transcriptionResponse.status === 400) {
+        return new Response(
+          JSON.stringify({ error: 'Formato de vídeo não suportado ou vídeo muito grande.' }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         );
       }
       throw new Error('Erro ao transcrever vídeo');
     }
 
     const transcriptionData = await transcriptionResponse.json();
-    const transcript = transcriptionData.choices[0].message.content;
+    const transcript = transcriptionData.candidates[0].content.parts[0].text;
 
     console.log('Transcrição concluída. Iniciando análise...');
 
@@ -177,22 +185,28 @@ Objetivo: ${objective}
 Transcrição:
 ${transcript}`;
 
-    const analysisResponse = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${LOVABLE_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: 'google/gemini-2.5-flash',
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPrompt }
-        ],
-        temperature: 0.7,
-        max_tokens: 4000,
-      }),
-    });
+    const analysisResponse = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${GEMINI_API_KEY}`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          contents: [
+            {
+              parts: [
+                { text: `${systemPrompt}\n\n${userPrompt}` }
+              ]
+            }
+          ],
+          generationConfig: {
+            temperature: 0.7,
+            maxOutputTokens: 4000,
+          }
+        }),
+      }
+    );
 
     if (!analysisResponse.ok) {
       if (analysisResponse.status === 429) {
@@ -201,19 +215,19 @@ ${transcript}`;
           { status: 429, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         );
       }
-      if (analysisResponse.status === 402) {
+      if (analysisResponse.status === 403) {
         return new Response(
-          JSON.stringify({ error: 'Créditos insuficientes. Adicione créditos à sua conta.' }),
-          { status: 402, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          JSON.stringify({ error: 'Chave da API inválida.' }),
+          { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         );
       }
       const errorText = await analysisResponse.text();
-      console.error('Erro da API AI na análise:', analysisResponse.status, errorText);
+      console.error('Erro da API Gemini na análise:', analysisResponse.status, errorText);
       throw new Error('Erro ao processar análise');
     }
 
     const analysisData = await analysisResponse.json();
-    const analysis = analysisData.choices[0].message.content;
+    const analysis = analysisData.candidates[0].content.parts[0].text;
 
     console.log('Análise concluída com sucesso.');
 
