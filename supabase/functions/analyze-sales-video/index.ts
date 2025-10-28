@@ -2,32 +2,31 @@ import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 
 const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
 serve(async (req) => {
-  if (req.method === 'OPTIONS') {
+  if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
     const { salesperson, product, objective, videoBase64, mimeType } = await req.json();
-    const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
+    const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY");
 
     if (!GEMINI_API_KEY) {
-      throw new Error('GEMINI_API_KEY não configurada');
+      throw new Error("GEMINI_API_KEY não configurada");
     }
 
     if (!videoBase64 || !mimeType) {
-      throw new Error('Dados do vídeo não fornecidos');
+      throw new Error("Dados do vídeo não fornecidos");
     }
 
-    console.log('Iniciando transcrição do vídeo...');
+    console.log("Iniciando transcrição do vídeo..."); // Step 1: Transcribe the video using Gemini
 
-    // Step 1: Transcribe the video using Gemini
-    const transcriptionPrompt = `Por favor, transcreva completamente o áudio deste vídeo de vendas. 
-    
+    const transcriptionPrompt = `Por favor, transcreva completamente o áudio deste vídeo de vendas. 
+    
 Inclua:
 1. Todo o diálogo falado, palavra por palavra
 2. Pausas significativas (indicar com [...])
@@ -39,9 +38,9 @@ Formate a transcrição de forma clara e sequencial.`;
     const transcriptionResponse = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${GEMINI_API_KEY}`,
       {
-        method: 'POST',
+        method: "POST",
         headers: {
-          'Content-Type': 'application/json',
+          "Content-Type": "application/json",
         },
         body: JSON.stringify({
           contents: [
@@ -51,49 +50,48 @@ Formate a transcrição de forma clara e sequencial.`;
                 {
                   inline_data: {
                     mime_type: mimeType,
-                    data: videoBase64
-                  }
-                }
-              ]
-            }
+                    data: videoBase64,
+                  },
+                },
+              ],
+            },
           ],
           generationConfig: {
             temperature: 0.3,
             maxOutputTokens: 4000,
-          }
+          },
         }),
-      }
+      },
     );
 
     if (!transcriptionResponse.ok) {
       const errorText = await transcriptionResponse.text();
-      console.error('Erro na transcrição:', transcriptionResponse.status, errorText);
-      
+      console.error("Erro na transcrição:", transcriptionResponse.status, errorText);
       if (transcriptionResponse.status === 429) {
-        return new Response(
-          JSON.stringify({ error: 'Limite de taxa excedido. Tente novamente mais tarde.' }),
-          { status: 429, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        );
+        return new Response(JSON.stringify({ error: "Limite de taxa excedido. Tente novamente mais tarde." }), {
+          status: 429,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
       }
       if (transcriptionResponse.status === 403) {
-        return new Response(
-          JSON.stringify({ error: 'Chave da API inválida.' }),
-          { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        );
+        return new Response(JSON.stringify({ error: "Chave da API inválida." }), {
+          status: 403,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
       }
       if (transcriptionResponse.status === 400) {
-        return new Response(
-          JSON.stringify({ error: 'Formato de vídeo não suportado ou vídeo muito grande.' }),
-          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        );
+        return new Response(JSON.stringify({ error: "Formato de vídeo não suportado ou vídeo muito grande." }), {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
       }
-      throw new Error('Erro ao transcrever vídeo');
+      throw new Error("Erro ao transcrever vídeo");
     }
 
     const transcriptionData = await transcriptionResponse.json();
     const transcript = transcriptionData.candidates[0].content.parts[0].text;
 
-    console.log('Transcrição concluída. Iniciando análise...');
+    console.log("Transcrição concluída. Iniciando análise...");
 
     const systemPrompt = `Você é um "Analista de Performance de Vendas IA", um especialista sênior em coaching de vendas para a indústria farmacêutica. Sua especialidade é analisar roteiros e abordagens de comunicação em vídeo. Seu tom é profissional, analítico, objetivo e, acima de tudo, construtivo.
 
@@ -173,9 +171,8 @@ FORMATO DO RELATÓRIO:
 ## Recomendações Práticas
 [3-5 recomendações imediatamente aplicáveis]
 
-IMPORTANTE: Seja específico, baseado em evidências da transcrição, e foque em feedback acionável.`;
+IMPORTANTE: Seja específico, baseado em evidências da transcrição, e foque em feedback acionável.`; // Step 2: Analyze the transcript
 
-    // Step 2: Analyze the transcript
     const userPrompt = `Por favor, analise o seguinte vídeo de vendas:
 
 Vendedor: ${salesperson}
@@ -188,59 +185,56 @@ ${transcript}`;
     const analysisResponse = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${GEMINI_API_KEY}`,
       {
-        method: 'POST',
+        method: "POST",
         headers: {
-          'Content-Type': 'application/json',
+          "Content-Type": "application/json",
         },
         body: JSON.stringify({
           contents: [
             {
-              parts: [
-                { text: `${systemPrompt}\n\n${userPrompt}` }
-              ]
-            }
+              parts: [{ text: `${systemPrompt}\n\n${userPrompt}` }],
+            },
           ],
           generationConfig: {
             temperature: 0.7,
             maxOutputTokens: 4000,
-          }
+          },
         }),
-      }
+      },
     );
 
     if (!analysisResponse.ok) {
       if (analysisResponse.status === 429) {
-        return new Response(
-          JSON.stringify({ error: 'Limite de taxa excedido. Tente novamente mais tarde.' }),
-          { status: 429, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        );
+        return new Response(JSON.stringify({ error: "Limite de taxa excedido. Tente novamente mais tarde." }), {
+          status: 429,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
       }
       if (analysisResponse.status === 403) {
-        return new Response(
-          JSON.stringify({ error: 'Chave da API inválida.' }),
-          { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        );
+        return new Response(JSON.stringify({ error: "Chave da API inválida." }), {
+          status: 403,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
       }
       const errorText = await analysisResponse.text();
-      console.error('Erro da API Gemini na análise:', analysisResponse.status, errorText);
-      throw new Error('Erro ao processar análise');
+      console.error("Erro da API Gemini na análise:", analysisResponse.status, errorText);
+      throw new Error("Erro ao processar análise");
     }
 
     const analysisData = await analysisResponse.json();
     const analysis = analysisData.candidates[0].content.parts[0].text;
 
-    console.log('Análise concluída com sucesso.');
+    console.log("Análise concluída com sucesso."); // *** ESTA É A LINHA MODIFICADA ***
 
     return new Response(
-      JSON.stringify({ analysis }),
-      { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      JSON.stringify({ analysis, transcript }), // Retorna ambos os objetos
+      { headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
-
   } catch (error) {
-    console.error('Erro na função analyze-sales-video:', error);
-    return new Response(
-      JSON.stringify({ error: error instanceof Error ? error.message : 'Erro desconhecido' }),
-      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-    );
+    console.error("Erro na função analyze-sales-video:", error);
+    return new Response(JSON.stringify({ error: error instanceof Error ? error.message : "Erro desconhecido" }), {
+      status: 500,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
   }
 });
